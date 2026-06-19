@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 17 — Memory Agents Demo</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <div class="logo">M</div>
+        <div>
+          <h1>Memory Systems for AI Agent</h1>
+          <p>So sánh Baseline vs Advanced — short-term, User.md, compact memory</p>
+        </div>
+      </div>
+      <div class="status-pills" id="statusPills">
+        <span class="pill" id="providerPill">Provider: ...</span>
+        <span class="pill" id="modePill">Mode: ...</span>
+        <span class="pill warn" id="offlineBanner" hidden>Offline mode</span>
+      </div>
+    </header>
+
+    <section class="controls">
+      <div class="field">
+        <label for="userId">User ID</label>
+        <input id="userId" value="demo_user" />
+      </div>
+      <div class="field">
+        <label for="threadId">Thread ID</label>
+        <input id="threadId" value="thread-1" />
+      </div>
+      <div class="actions">
+        <button class="btn secondary" id="newThreadBtn">Thread mới</button>
+        <button class="btn secondary" id="resetThreadBtn">Reset thread</button>
+        <button class="btn danger" id="resetAllBtn">Reset tất cả + User.md</button>
+        <button class="btn accent" id="benchmarkBtn">Quick benchmark</button>
+      </div>
+    </section>
+
+    <section class="scenarios">
+      <span class="scenario-label">Kịch bản test nhanh:</span>
+      <button class="chip" data-message="Chào bạn, mình tên là DũngCT, ở Huế và làm MLOps engineer.">Giới thiệu bản thân</button>
+      <button class="chip" data-message="Mình thích cà phê sữa đá và muốn bạn trả lời ngắn gọn, có ví dụ thực tế.">Thêm preference</button>
+      <button class="chip" data-message="Mình tên gì, làm nghề gì và đang ở đâu?">Hỏi recall</button>
+      <button class="chip" data-message="Đính chính: giờ mình đang ở Đà Nẵng, không còn ở Huế nữa.">Correction nơi ở</button>
+      <button class="chip stress" data-message="Tin stress test: NASA Artemis III roadmap 2027, X-59 giảm sonic boom, WMO El Nino 80%, BC energy +20% đến 2030. Mình muốn bạn nhớ pattern readiness, externality, uncertainty, efficiency.">Stress context dài</button>
+    </section>
+
+    <main class="workspace">
+      <section class="chat-column" id="baselineColumn">
+        <div class="column-header baseline">
+          <div>
+            <h2>Baseline Agent</h2>
+            <p>Chỉ short-term memory trong thread</p>
+          </div>
+          <div class="metrics" id="baselineMetrics">
+            <span>Tokens: 0</span>
+            <span>Prompt: 0</span>
+          </div>
+        </div>
+        <div class="messages" id="baselineMessages"></div>
+      </section>
+
+      <section class="chat-column" id="advancedColumn">
+        <div class="column-header advanced">
+          <div>
+            <h2>Advanced Agent</h2>
+            <p>User.md + compact memory + short-term</p>
+          </div>
+          <div class="metrics" id="advancedMetrics">
+            <span>Tokens: 0</span>
+            <span>Prompt: 0</span>
+            <span>Compact: 0</span>
+          </div>
+        </div>
+        <div class="messages" id="advancedMessages"></div>
+      </section>
+
+      <aside class="inspector">
+        <h3>Memory Inspector</h3>
+        <div class="inspector-block">
+          <h4>User.md</h4>
+          <pre id="profileMd"># User Profile</pre>
+        </div>
+        <div class="inspector-block">
+          <h4>Compact summary</h4>
+          <pre id="compactSummary">(chưa có)</pre>
+        </div>
+        <div class="inspector-block">
+          <h4>So sánh nhanh</h4>
+          <div class="compare-grid" id="compareGrid">
+            <div><strong>Baseline</strong><br />Không nhớ xuyên thread</div>
+            <div><strong>Advanced</strong><br />Nhớ qua User.md</div>
+          </div>
+        </div>
+        <div class="inspector-block" id="benchmarkBox" hidden>
+          <h4>Quick benchmark</h4>
+          <pre id="benchmarkResult"></pre>
+        </div>
+      </aside>
+    </main>
+
+    <footer class="composer">
+      <textarea id="messageInput" rows="2" placeholder="Nhập tin nhắn gửi cho cả hai agent..."></textarea>
+      <button class="btn primary" id="sendBtn">Gửi</button>
+    </footer>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

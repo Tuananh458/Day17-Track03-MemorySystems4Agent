@@ -1,19 +1,20 @@
 # Student Scaffold
 
-This `src/` folder is the student version of the lab.
+This `src/` folder contains the completed Day 17 lab implementation.
 
-- It keeps the same high-level structure
-- The Python files are intentionally incomplete and contain pseudocode / TODOs
-- The benchmark structure should include: standard benchmark + long-context stress benchmark
-- The runtime should support these providers: `openai`, `custom`, `gemini`, `anthropic`, `ollama`, `openrouter`
+- Baseline and Advanced agents with offline + LangGraph live paths
+- LangGraph uses `create_agent`, `MemorySaver`, tools, and `SummarizationMiddleware`
+- Benchmark: standard + long-context stress
+- Demo UI: `python demo_server.py`
 
 Suggested flow:
 
-1. Start with `config.py`
-2. Implement `memory_store.py`
-3. Finish `agent_baseline.py`
-4. Finish `agent_advanced.py`
-5. Implement `benchmark.py`
-6. Make `test_agents.py` pass
+1. `config.py`
+2. `memory_store.py`
+3. `agent_baseline.py` + `agent_advanced.py`
+4. `langgraph_runtime.py`
+5. `benchmark.py`
+6. `test_agents.py`
+7. `python demo_server.py` for interactive demo
 
 Datasets are available at the repo root in `data/`.

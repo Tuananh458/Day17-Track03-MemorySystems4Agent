@@ -27,10 +27,12 @@ Sau khi hoàn thành, các bạn cần có khả năng:
 
 ## Cấu trúc codebase
 
-Repo này được chia thành ba phần rõ ràng:
+Repo gồm:
 
-- `src/`: bản scaffold dành cho sinh viên, chứa pseudocode và TODO để hoàn thiện
-- `data/`: dữ liệu benchmark ở root để dùng cho cả benchmark chuẩn và stress benchmark
+- `src/`: implementation đầy đủ — baseline/advanced agents, memory, benchmark, demo web
+- `data/`: dữ liệu benchmark (standard + stress)
+- `ANALYSIS.md`: phân tích trade-off và kết quả
+- `SUBMISSION.md`: checklist nộp bài
 
 ## Provider hỗ trợ
 
@@ -63,6 +65,34 @@ Khi hoàn thiện bài, benchmark nên cho các cột sau:
 
 ## Cách dùng repo này
 
+### Chạy demo web (so sánh 2 agent)
+
+```bash
+pip install -r requirements.txt
+cd src
+python demo_server.py
+```
+
+Mở trình duyệt: **http://127.0.0.1:8765**
+
+Giao diện demo cho phép:
+- chat song song Baseline vs Advanced
+- đổi `User ID` / `Thread ID` để test cross-session recall
+- xem `User.md` và compact summary realtime
+- chạy quick benchmark ngay trên UI
+
+### Chạy benchmark & test
+
+```bash
+cd src
+python -m pytest test_agents.py -v
+python benchmark.py
+```
+
+Trên Windows nếu pytest báo lỗi plugin `deepeval`: `$env:PYTEST_DISABLE_PLUGIN_AUTOLOAD=1` trước khi chạy.
+
+Phân tích kết quả: xem `ANALYSIS.md`. Checklist nộp bài: xem `SUBMISSION.md`.
+
 ## Setup môi trường
 
 Các bạn cần chuẩn bị môi trường Python `>= 3.11` và cài các package cần thiết cho LangChain, LangGraph, provider SDK, `python-dotenv`, `tabulate`, và `pytest`.
@@ -75,14 +105,7 @@ pip install langchain langgraph langchain-openai langchain-google-genai langchai
 
 Sau đó làm việc trực tiếp với `src/` và `data/` ở root repo.
 
-Nếu các bạn là sinh viên:
-
-- làm bài trong `src/`
-- dùng `data/` làm benchmark input
-
-Nếu các bạn là giảng viên hoặc reviewer:
-
-- dùng `src/` để đánh giá scaffold giao cho sinh viên và kết quả hoàn thiện cuối cùng
+Copy `.env.example` thành `.env` trước khi chạy live demo hoặc benchmark có LLM.
 
 ## Tài liệu nên đọc tiếp
 
