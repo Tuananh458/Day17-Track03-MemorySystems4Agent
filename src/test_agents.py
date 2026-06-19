@@ -5,7 +5,12 @@ from pathlib import Path
 from agent_advanced import AdvancedAgent
 from agent_baseline import BaselineAgent
 from config import LabConfig
-from memory_store import CompactMemoryManager, UserProfileStore, extract_profile_updates
+from memory_store import (
+    CompactMemoryManager,
+    UserProfileStore,
+    extract_profile_candidates,
+    extract_profile_updates,
+)
 from model_provider import ProviderConfig
 
 
@@ -28,6 +33,8 @@ def make_config(tmp_path: Path) -> LabConfig:
         compact_threshold_tokens=50,
         compact_keep_messages=2,
         profile_confidence_threshold=0.7,
+        profile_decay_half_life_days=7.0,
+        profile_decay_min_confidence=0.5,
         model=provider,
         judge_model=provider,
         force_offline=True,
@@ -133,3 +140,47 @@ def test_noise_profession_not_saved() -> None:
         "Có lúc mình đùa với đồng nghiệp rằng hay là chuyển sang product manager cho đỡ phải ngồi canh pipeline, nhưng đó chỉ là câu đùa."
     )
     assert "profession" not in updates
+
+
+def test_entity_extraction_has_structured_types() -> None:
+    facts = extract_profile_candidates("Mình tên là DũngCT, mình ở Huế và làm MLOps engineer.")
+    by_key = {fact.key: fact for fact in facts}
+    assert by_key["name"].entity_type == "person"
+    assert by_key["location"].entity_type == "location"
+    assert by_key["profession"].entity_type == "profession"
+
+
+def test_memory_decay_excludes_stale_fact(tmp_path: Path) -> None:
+    import time
+
+    store = UserProfileStore(
+        tmp_path / "profiles",
+        decay_half_life_days=7.0,
+        min_effective_confidence=0.5,
+    )
+    store.upsert_entity("u1", "location", "Huế", confidence=0.85, entity_type="location")
+    entities = store.load_entities("u1")
+    entities["location"].updated_at = time.time() - (60 * 86_400)
+    store.save_entities("u1", entities)
+
+    assert "location" not in store.active_facts("u1")
+    assert "Huế" not in store.get_active_profile_text("u1")
+
+
+def test_remention_restores_decayed_fact(tmp_path: Path) -> None:
+    import time
+
+    store = UserProfileStore(
+        tmp_path / "profiles",
+        decay_half_life_days=7.0,
+        min_effective_confidence=0.5,
+    )
+    store.upsert_entity("u1", "favorite_drink", "cà phê sữa đá", confidence=0.9, entity_type="preference")
+    entities = store.load_entities("u1")
+    entities["favorite_drink"].updated_at = time.time() - (45 * 86_400)
+    store.save_entities("u1", entities)
+    assert "favorite_drink" not in store.active_facts("u1")
+
+    store.upsert_entity("u1", "favorite_drink", "cà phê sữa đá", confidence=0.9, entity_type="preference")
+    assert "favorite_drink" in store.active_facts("u1")
+    assert store.load_entities("u1")["favorite_drink"].mention_count >= 2

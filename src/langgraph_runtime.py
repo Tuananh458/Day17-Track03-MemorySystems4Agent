@@ -81,13 +81,13 @@ class AdvancedToolFactory:
 
         @tool
         def read_user_profile() -> str:
-            """Read persistent User.md for the current user."""
-            return store.read_text(holder.user_id)
+            """Read persistent User.md for the current user (active facts after memory decay)."""
+            return store.get_active_profile_text(holder.user_id)
 
         @tool
         def upsert_user_fact(key: str, value: str) -> str:
             """Save or update one stable fact in User.md."""
-            store.upsert_fact(holder.user_id, key.strip(), value.strip())
+            store.upsert_entity(holder.user_id, key.strip(), value.strip(), confidence=0.85)
             return f"Saved {key}={value} to User.md"
 
         @tool

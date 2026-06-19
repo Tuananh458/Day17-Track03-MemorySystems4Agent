@@ -34,7 +34,7 @@ python -m pytest test_agents.py -v
 
 (Nếu máy cài `deepeval` global, cần tắt autoload plugin để tránh xung đột OpenTelemetry.)
 
-Kỳ vọng: **8 passed**.
+Kỳ vọng: **11 passed**.
 
 4. Chạy benchmark:
 
@@ -78,7 +78,7 @@ python test_proxy.py
 | 0–60 | Baseline + Advanced cơ bản | Done |
 | 60–75 | Benchmark + pytest | Done |
 | 75–90 | ANALYSIS.md trade-offs | Done |
-| 90–100 | Bonus guardrail | Done (confidence, correction, noise) |
+| 90–100 | Bonus guardrail | Done (confidence, entity extraction, memory decay, conflict) |
 
 ## Ghi chú demo / screenshot (nếu giảng viên yêu cầu)
 

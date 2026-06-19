@@ -17,6 +17,8 @@ class LabConfig:
     compact_threshold_tokens: int
     compact_keep_messages: int
     profile_confidence_threshold: float
+    profile_decay_half_life_days: float
+    profile_decay_min_confidence: float
     model: ProviderConfig
     judge_model: ProviderConfig
     force_offline: bool = False
@@ -87,6 +89,8 @@ def load_config(base_dir: Path | None = None) -> LabConfig:
         compact_threshold_tokens=int(os.getenv("COMPACT_THRESHOLD_TOKENS", "1200")),
         compact_keep_messages=int(os.getenv("COMPACT_KEEP_MESSAGES", "6")),
         profile_confidence_threshold=float(os.getenv("PROFILE_CONFIDENCE_THRESHOLD", "0.7")),
+        profile_decay_half_life_days=float(os.getenv("PROFILE_DECAY_HALF_LIFE_DAYS", "30")),
+        profile_decay_min_confidence=float(os.getenv("PROFILE_DECAY_MIN_CONFIDENCE", "0.5")),
         model=_provider_from_env("LLM"),
         judge_model=_provider_from_env("JUDGE"),
         force_offline=_env_bool("FORCE_OFFLINE", default=False),

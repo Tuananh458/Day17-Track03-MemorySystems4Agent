@@ -123,6 +123,7 @@ def memory(user_id: str, thread_id: str = "thread-1") -> dict[str, Any]:
     compact_context = advanced_agent.get_compact_context(thread_id)
     return {
         "profile_md": advanced_agent.get_profile_text(user_id),
+        "profile_entities": advanced_agent.get_structured_entities(user_id),
         "memory_file_bytes": advanced_agent.memory_file_size(user_id),
         "compact_summary": str(compact_context.get("summary", "")),
         "compactions": advanced_agent.compaction_count(thread_id),

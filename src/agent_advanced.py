@@ -12,7 +12,7 @@ from langgraph_runtime import (
     langgraph_available,
 )
 from llm_chat import llm_dependencies_available
-from memory_store import CompactMemoryManager, UserProfileStore, estimate_tokens, extract_profile_updates
+from memory_store import CompactMemoryManager, UserProfileStore, estimate_tokens, extract_profile_candidates, extract_profile_updates
 from model_provider import build_chat_model
 
 
@@ -20,7 +20,11 @@ class AdvancedAgent:
     def __init__(self, config: LabConfig | None = None, force_offline: bool = False) -> None:
         self.config = config or load_config()
         self.force_offline = force_offline or self.config.force_offline
-        self.profile_store = UserProfileStore(self.config.state_dir / "profiles")
+        self.profile_store = UserProfileStore(
+            self.config.state_dir / "profiles",
+            decay_half_life_days=self.config.profile_decay_half_life_days,
+            min_effective_confidence=self.config.profile_decay_min_confidence,
+        )
         self.compact_memory = CompactMemoryManager(
             threshold_tokens=self.config.compact_threshold_tokens,
             keep_messages=self.config.compact_keep_messages,
@@ -54,7 +58,13 @@ class AdvancedAgent:
         return self.compact_memory.compaction_count(thread_id)
 
     def get_profile_text(self, user_id: str) -> str:
+        return self.profile_store.get_active_profile_text(user_id)
+
+    def get_full_profile_text(self, user_id: str) -> str:
         return self.profile_store.read_text(user_id)
+
+    def get_structured_entities(self, user_id: str) -> list[dict[str, object]]:
+        return self.profile_store.structured_entities_export(user_id)
 
     def get_compact_context(self, thread_id: str) -> dict[str, object]:
         return self.compact_memory.context(thread_id)
@@ -76,6 +86,9 @@ class AdvancedAgent:
         path = self.profile_store.path_for(user_id)
         if path.exists():
             path.unlink()
+        meta_path = self.profile_store.meta_path_for(user_id)
+        if meta_path.exists():
+            meta_path.unlink()
 
     def reset_all(self) -> None:
         self.compact_memory.state.clear()
@@ -96,18 +109,24 @@ class AdvancedAgent:
         }
 
     def _memory_context(self) -> dict[str, str]:
-        profile = self.profile_store.read_text(self._current_user_id).strip() or "(chưa có profile)"
+        profile = self.profile_store.get_active_profile_text(self._current_user_id).strip() or "(chưa có profile)"
         context = self.compact_memory.context(self._current_thread_id)
         summary = str(context.get("summary", "")).strip() or "(chưa có summary)"
         return {"profile": profile, "summary": summary}
 
     def _persist_profile_updates(self, user_id: str, message: str) -> dict[str, str]:
-        updates = extract_profile_updates(
-            message,
-            min_confidence=self.config.profile_confidence_threshold,
-        )
-        for key, value in updates.items():
-            self.profile_store.upsert_fact(user_id, key, value)
+        updates: dict[str, str] = {}
+        for fact in extract_profile_candidates(message):
+            if fact.confidence < self.config.profile_confidence_threshold:
+                continue
+            self.profile_store.upsert_entity(
+                user_id,
+                fact.key,
+                fact.value,
+                confidence=fact.confidence,
+                entity_type=fact.entity_type,
+            )
+            updates[fact.key] = fact.value
         return updates
 
     def _reply_offline(self, user_id: str, thread_id: str, message: str) -> dict[str, Any]:
@@ -172,7 +191,7 @@ class AdvancedAgent:
         )
 
     def _estimate_prompt_context_tokens(self, user_id: str, thread_id: str) -> int:
-        profile_text = self.profile_store.read_text(user_id)
+        profile_text = self.profile_store.get_active_profile_text(user_id)
         context = self.compact_memory.context(thread_id)
         total = estimate_tokens(profile_text)
         total += estimate_tokens(str(context.get("summary", "")))
@@ -182,7 +201,7 @@ class AdvancedAgent:
         return total
 
     def _offline_response(self, user_id: str, thread_id: str, message: str) -> str:
-        facts = self.profile_store.facts(user_id)
+        facts = self.profile_store.active_facts(user_id)
         lowered = message.lower()
 
         def fact(key: str, default: str = "") -> str:

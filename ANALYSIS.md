@@ -11,7 +11,8 @@ flowchart TB
         A1[SessionState / MemorySaver] --> A3[LLM]
         A2[User.md persistent] --> A3
         A4[CompactMemoryManager / SummarizationMiddleware] --> A3
-        A5[extract_profile_updates + confidence] --> A2
+        A5[extract_profile_candidates + guardrails] --> A2
+        A6[Memory decay + entities.json] --> A2
     end
 ```
 
@@ -89,25 +90,56 @@ Stress benchmark có chuỗi turn rất dài. Baseline giữ nguyên toàn bộ 
 
 ## 5. Bonus: guardrail đã triển khai
 
+### Entity extraction có cấu trúc (`*.entities.json`)
+
+Mỗi fact được lưu thành `ProfileEntity` với field: `key`, `value`, `entity_type` (person/location/profession/preference/…), `confidence`, `updated_at`, `mention_count`.
+
+- `User.md` vẫn human-readable cho debug/demo.
+- `entities.json` là nguồn structured cho benchmark, decay và conflict handling.
+- Extract từ message qua pattern tiếng Việt → map sang entity type chuẩn.
+
 ### Confidence threshold (`PROFILE_CONFIDENCE_THRESHOLD`, mặc định `0.7`)
 
-`extract_profile_candidates()` gán confidence theo pattern (ví dụ: đính chính = 1.0, "mình tên là" = 0.95, keyword interests = 0.72). Chỉ fact ≥ ngưỡng mới ghi vào `User.md`.
+`extract_profile_candidates()` gán confidence theo pattern (ví dụ: đính chính = 1.0, "mình tên là" = 0.95, keyword interests = 0.72). Chỉ fact ≥ ngưỡng mới ghi vào profile.
+
+### Memory decay (`PROFILE_DECAY_HALF_LIFE_DAYS`, mặc định `30`)
+
+Fact cũ giảm **effective confidence** theo half-life:
+
+`effective = confidence × 0.5^(days/half_life) + mention_boost`
+
+- Fact không được nhắc lại > ~30 ngày → có thể bị loại khỏi **active profile** inject vào prompt (giảm token, tránh fact lỗi thời).
+- User nhắc lại cùng fact → `mention_count` tăng, `updated_at` refresh → fact “sống lại”.
+- File vẫn giữ fact đầy đủ trong storage; chỉ **active view** bị lọc.
 
 ### Conflict / correction handling
 
-- Cùng key: giữ fact confidence cao nhất trong một message.
-- Upsert vào `User.md`: fact mới ghi đè fact cũ (Huế → Đà Nẵng).
+- Cùng key trong một message: giữ fact confidence cao nhất.
+- Upsert: fact mới ghi đè fact cũ (Đà Nẵng → Huế).
 - Pattern "đính chính" / "giờ chuyển sang" được ưu tiên confidence cao.
 
 ### Noise filtering
 
-Bỏ qua location/profession khi message chứa marker nhiễu (`câu đùa`, `chỉ là nơi mình bay`, `product manager cho đỡ`, …). Câu hỏi không được extract (`_looks_like_question`).
+Bỏ qua location/profession khi message chứa marker nhiễu. Câu hỏi không được extract (`_looks_like_question`).
 
-Test: `test_question_not_saved_to_profile`, `test_correction_overwrites_location`, `test_noise_profession_not_saved`.
+Test: `test_entity_extraction_has_structured_types`, `test_memory_decay_excludes_stale_fact`, `test_remention_restores_decayed_fact`, `test_correction_overwrites_location`, `test_noise_profession_not_saved`.
 
 ---
 
-## 6. LangGraph live mode
+## 6. Trade-off của bonus (theo rubric 90–100)
+
+| Bonus | Giải quyết vấn đề gì | Cải thiện recall / token | Rủi ro thêm |
+|---|---|---|---|
+| **Confidence threshold** | Lưu nhầm fact yếu từ câu nói mơ hồ | Recall chính xác hơn; ít noise trong prompt | Ngưỡng cao → bỏ sót fact hợp lệ confidence thấp |
+| **Entity extraction** | Fact rời rạc, khó debug/decay | Field rõ ràng; dễ filter theo loại | Regex chưa cover mọi cách diễn đạt tiếng Việt |
+| **Memory decay** | Profile phình + fact lỗi thời chiếm prompt | Giảm `prompt tokens processed` khi profile lớn/cũ | Fact hợp lệ nhưng ít nhắc lại có thể “mất” tạm thời |
+| **Conflict handling** | Fact cũ và mới cùng tồn tại | Recall đúng sau correction | Correction sai/thiếu ngữ cảnh có thể ghi đè fact đúng |
+
+**Cân bằng production:** dùng decay + threshold cùng nhau — decay giảm token, threshold giảm noise; cần monitor `entities.json` và cho phép user xem/sửa profile (demo UI đã có panel User.md).
+
+---
+
+## 7. LangGraph live mode
 
 Khi `FORCE_OFFLINE=false` và LangGraph khả dụng:
 
@@ -129,4 +161,4 @@ Provider đã kiểm tra: Antco AI Gateway (`LLM_PROVIDER=antco`, `CUSTOM_BASE_U
 | Hội thoại dài | Prompt phình | Compact kiểm soát prompt |
 | Độ phức tạp | Thấp | Cao hơn, cần guardrail |
 
-Production nên dùng Advanced khi cần personalization dài hạn, kèm confidence threshold, conflict handling và giám sát kích thước memory file.
+Production nên dùng Advanced khi cần personalization dài hạn, kèm confidence threshold, entity schema, memory decay, conflict handling và giám sát kích thước `User.md` + `entities.json`.

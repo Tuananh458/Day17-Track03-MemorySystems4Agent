@@ -1,8 +1,22 @@
 from __future__ import annotations
 
+import json
 import re
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
+
+
+ENTITY_TYPE_BY_KEY: dict[str, str] = {
+    "name": "person",
+    "location": "location",
+    "profession": "profession",
+    "favorite_drink": "preference",
+    "favorite_food": "preference",
+    "response_style": "style",
+    "pet": "pet",
+    "interests": "interest",
+}
 
 
 def estimate_tokens(text: str) -> int:
@@ -35,14 +49,62 @@ def _render_profile(facts: dict[str, str]) -> str:
 
 
 @dataclass
+class ProfileEntity:
+    key: str
+    value: str
+    confidence: float = 0.8
+    entity_type: str = "general"
+    updated_at: float = 0.0
+    mention_count: int = 1
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "key": self.key,
+            "value": self.value,
+            "confidence": self.confidence,
+            "entity_type": self.entity_type,
+            "updated_at": self.updated_at,
+            "mention_count": self.mention_count,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, object]) -> ProfileEntity:
+        return cls(
+            key=str(data.get("key", "")),
+            value=str(data.get("value", "")),
+            confidence=float(data.get("confidence", 0.8)),
+            entity_type=str(data.get("entity_type", "general")),
+            updated_at=float(data.get("updated_at", 0.0)),
+            mention_count=int(data.get("mention_count", 1)),
+        )
+
+
+def effective_confidence(
+    entity: ProfileEntity,
+    half_life_days: float,
+    now: float | None = None,
+) -> float:
+    current = now if now is not None else time.time()
+    days = max(0.0, (current - entity.updated_at) / 86_400.0)
+    decay = 0.5 ** (days / max(half_life_days, 0.1))
+    mention_boost = min(0.2, max(0, entity.mention_count - 1) * 0.05)
+    return min(1.0, entity.confidence * decay + mention_boost)
+
+
+@dataclass
 class UserProfileStore:
     root_dir: Path
+    decay_half_life_days: float = 30.0
+    min_effective_confidence: float = 0.5
 
     def __post_init__(self) -> None:
         self.root_dir.mkdir(parents=True, exist_ok=True)
 
     def path_for(self, user_id: str) -> Path:
         return self.root_dir / f"{_slugify(user_id)}.md"
+
+    def meta_path_for(self, user_id: str) -> Path:
+        return self.root_dir / f"{_slugify(user_id)}.entities.json"
 
     def read_text(self, user_id: str) -> str:
         path = self.path_for(user_id)
@@ -64,15 +126,122 @@ class UserProfileStore:
 
     def file_size(self, user_id: str) -> int:
         path = self.path_for(user_id)
-        return path.stat().st_size if path.exists() else 0
+        md_size = path.stat().st_size if path.exists() else 0
+        meta_path = self.meta_path_for(user_id)
+        meta_size = meta_path.stat().st_size if meta_path.exists() else 0
+        return md_size + meta_size
 
     def facts(self, user_id: str) -> dict[str, str]:
         return _parse_profile(self.read_text(user_id))
 
+    def load_entities(self, user_id: str) -> dict[str, ProfileEntity]:
+        meta_path = self.meta_path_for(user_id)
+        if meta_path.exists():
+            raw = json.loads(meta_path.read_text(encoding="utf-8"))
+            return {
+                str(key): ProfileEntity.from_dict(item)
+                for key, item in raw.items()
+            }
+
+        now = time.time()
+        entities: dict[str, ProfileEntity] = {}
+        for key, value in self.facts(user_id).items():
+            entities[key] = ProfileEntity(
+                key=key,
+                value=value,
+                confidence=0.8,
+                entity_type=ENTITY_TYPE_BY_KEY.get(key, "general"),
+                updated_at=now,
+                mention_count=1,
+            )
+        if entities:
+            self.save_entities(user_id, entities)
+        return entities
+
+    def save_entities(self, user_id: str, entities: dict[str, ProfileEntity]) -> None:
+        meta_path = self.meta_path_for(user_id)
+        payload = {key: entity.to_dict() for key, entity in sorted(entities.items())}
+        meta_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        self.write_text(user_id, _render_profile({key: entity.value for key, entity in entities.items()}))
+
+    def upsert_entity(
+        self,
+        user_id: str,
+        key: str,
+        value: str,
+        *,
+        confidence: float = 0.8,
+        entity_type: str | None = None,
+        now: float | None = None,
+    ) -> Path:
+        timestamp = now if now is not None else time.time()
+        entities = self.load_entities(user_id)
+        normalized_value = value.strip()
+        resolved_type = entity_type or ENTITY_TYPE_BY_KEY.get(key, "general")
+        existing = entities.get(key)
+
+        if existing and existing.value.strip() == normalized_value:
+            existing.mention_count += 1
+            existing.updated_at = timestamp
+            existing.confidence = max(existing.confidence, confidence)
+        else:
+            entities[key] = ProfileEntity(
+                key=key,
+                value=normalized_value,
+                confidence=confidence,
+                entity_type=resolved_type,
+                updated_at=timestamp,
+                mention_count=1,
+            )
+
+        self.save_entities(user_id, entities)
+        return self.path_for(user_id)
+
+    def active_entities(
+        self,
+        user_id: str,
+        *,
+        now: float | None = None,
+    ) -> dict[str, ProfileEntity]:
+        active: dict[str, ProfileEntity] = {}
+        for key, entity in self.load_entities(user_id).items():
+            if effective_confidence(entity, self.decay_half_life_days, now) >= self.min_effective_confidence:
+                active[key] = entity
+        return active
+
+    def active_facts(self, user_id: str, *, now: float | None = None) -> dict[str, str]:
+        return {key: entity.value for key, entity in self.active_entities(user_id, now=now).items()}
+
+    def get_active_profile_text(self, user_id: str, *, now: float | None = None) -> str:
+        entities = self.load_entities(user_id)
+        active = self.active_facts(user_id, now=now)
+        if not entities:
+            content = self.read_text(user_id).strip()
+            return content or "# User Profile\n"
+        if not active:
+            return "# User Profile\n"
+        return _render_profile(active)
+
+    def structured_entities_export(self, user_id: str, *, now: float | None = None) -> list[dict[str, object]]:
+        rows: list[dict[str, object]] = []
+        for entity in self.load_entities(user_id).values():
+            rows.append(
+                {
+                    "key": entity.key,
+                    "value": entity.value,
+                    "entity_type": entity.entity_type,
+                    "confidence": entity.confidence,
+                    "mention_count": entity.mention_count,
+                    "effective_confidence": round(
+                        effective_confidence(entity, self.decay_half_life_days, now),
+                        3,
+                    ),
+                }
+            )
+        return sorted(rows, key=lambda item: str(item["key"]))
+
     def upsert_fact(self, user_id: str, key: str, value: str) -> Path:
-        facts = self.facts(user_id)
-        facts[key] = value.strip()
-        return self.write_text(user_id, _render_profile(facts))
+        return self.upsert_entity(user_id, key, value)
 
 
 _QUESTION_HINTS = (
@@ -102,6 +271,20 @@ class ProfileFact:
     key: str
     value: str
     confidence: float
+    entity_type: str = "general"
+
+
+def _entity_type_for_key(key: str) -> str:
+    return ENTITY_TYPE_BY_KEY.get(key, "general")
+
+
+def _make_profile_fact(key: str, value: str, confidence: float) -> ProfileFact:
+    return ProfileFact(
+        key=key,
+        value=value,
+        confidence=confidence,
+        entity_type=_entity_type_for_key(key),
+    )
 
 
 _NOISE_MARKERS = (
@@ -136,7 +319,7 @@ def extract_profile_candidates(message: str) -> list[ProfileFact]:
         flags=re.IGNORECASE,
     )
     if name_match:
-        facts.append(ProfileFact("name", name_match.group(1).strip(), 0.95))
+        facts.append(_make_profile_fact("name", name_match.group(1).strip(), 0.95))
 
     location_patterns = [
         (r"đính chính[^.]*giờ mình đang ở\s+([^.,;!\n]+)", 1.0),
@@ -154,7 +337,7 @@ def extract_profile_candidates(message: str) -> list[ProfileFact]:
             if match:
                 location = match.group(1).strip()
                 location = re.sub(r"\s+(trong|vài|để|và).*$", "", location, flags=re.IGNORECASE)
-                facts.append(ProfileFact("location", location, confidence))
+                facts.append(_make_profile_fact("location", location, confidence))
                 break
 
     profession_patterns = [
@@ -173,19 +356,19 @@ def extract_profile_candidates(message: str) -> list[ProfileFact]:
                 profession = re.sub(r"\s+nữa$", "", profession, flags=re.IGNORECASE)
                 if "product manager" in profession.lower() and "đùa" in lowered:
                     continue
-                facts.append(ProfileFact("profession", profession, confidence))
+                facts.append(_make_profile_fact("profession", profession, confidence))
                 profession_found = True
                 break
         if not profession_found:
             match = re.search(r"(?:và\s+)?làm\s+([^.,;!\n]+)", text, flags=re.IGNORECASE)
             if match:
                 profession = match.group(1).strip()
-                facts.append(ProfileFact("profession", profession, 0.75))
+                facts.append(_make_profile_fact("profession", profession, 0.75))
 
     if "trả lời ngắn gọn" in lowered or "3 bullet" in lowered:
         if "3 bullet" in lowered:
             facts.append(
-                ProfileFact(
+                _make_profile_fact(
                     "response_style",
                     "3 bullet ngắn, có ví dụ thực chiến, nhấn trade-off",
                     0.9,
@@ -193,7 +376,7 @@ def extract_profile_candidates(message: str) -> list[ProfileFact]:
             )
         else:
             facts.append(
-                ProfileFact(
+                _make_profile_fact(
                     "response_style",
                     "ngắn gọn, rõ ý, có ví dụ thực tế",
                     0.85,
@@ -206,9 +389,9 @@ def extract_profile_candidates(message: str) -> list[ProfileFact]:
         flags=re.IGNORECASE,
     )
     if drink_match:
-        facts.append(ProfileFact("favorite_drink", drink_match.group(1).strip(), 0.9))
+        facts.append(_make_profile_fact("favorite_drink", drink_match.group(1).strip(), 0.9))
     elif "cà phê sữa đá" in lowered and "uống" in lowered:
-        facts.append(ProfileFact("favorite_drink", "cà phê sữa đá", 0.8))
+        facts.append(_make_profile_fact("favorite_drink", "cà phê sữa đá", 0.8))
 
     food_match = re.search(
         r"món ăn yêu thích(?:\s+là)?\s+([^.,;!\n]+)",
@@ -216,9 +399,9 @@ def extract_profile_candidates(message: str) -> list[ProfileFact]:
         flags=re.IGNORECASE,
     )
     if food_match:
-        facts.append(ProfileFact("favorite_food", food_match.group(1).strip(), 0.9))
+        facts.append(_make_profile_fact("favorite_food", food_match.group(1).strip(), 0.9))
     elif "mì quảng" in lowered:
-        facts.append(ProfileFact("favorite_food", "mì Quảng", 0.75))
+        facts.append(_make_profile_fact("favorite_food", "mì Quảng", 0.75))
 
     pet_match = re.search(
         r"nuôi[^.]*?(corgi)[^.]*tên\s+([^.,;!\n]+)",
@@ -227,7 +410,7 @@ def extract_profile_candidates(message: str) -> list[ProfileFact]:
     )
     if pet_match:
         facts.append(
-            ProfileFact(
+            _make_profile_fact(
                 "pet",
                 f"{pet_match.group(1)} tên {pet_match.group(2).strip()}",
                 0.9,
@@ -239,7 +422,7 @@ def extract_profile_candidates(message: str) -> list[ProfileFact]:
         if keyword in lowered:
             interest_bits.append(keyword)
     if interest_bits:
-        facts.append(ProfileFact("interests", ", ".join(dict.fromkeys(interest_bits)), 0.72))
+        facts.append(_make_profile_fact("interests", ", ".join(dict.fromkeys(interest_bits)), 0.72))
 
     return facts
 
